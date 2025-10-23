@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """
 TTPXHunter Integrated System Launcher
-Starts both the Flask backend and PyQt6 frontend with proper integration
+Starts the Flask backend and serves the web frontend as a static site.
+
+Backend: Flask (app.py) -> http://localhost:5000
+Frontend: Python http.server -> http://localhost:8000/index.html
 """
 
 import os
 import sys
 import time
 import subprocess
-import threading
-import signal
 from pathlib import Path
+import signal
+import threading
 
 def start_backend():
     """Start the Flask backend server"""
@@ -27,19 +30,17 @@ def start_backend():
         print(f"❌ Failed to start backend server: {e}")
         return None
 
-def start_frontend():
-    """Start the PyQt6 frontend"""
-    print("🎨 Starting PyQt6 frontend...")
+def start_static_frontend(port: int = 8000):
+    """Start a simple static file server for the web frontend."""
+    print("🎨 Starting static web frontend server...")
     try:
-        # Start frontend
         frontend_process = subprocess.Popen([
-            sys.executable, 'ui/dashboard_window.py'
+            sys.executable, '-m', 'http.server', str(port), '--bind', '127.0.0.1'
         ], cwd=Path(__file__).parent)
-        
-        print("✅ Frontend started successfully")
+        print(f"✅ Frontend server started: http://localhost:{port}/index.html")
         return frontend_process
     except Exception as e:
-        print(f"❌ Failed to start frontend: {e}")
+        print(f"❌ Failed to start static frontend server: {e}")
         return None
 
 def check_dependencies():
@@ -50,8 +51,6 @@ def check_dependencies():
     package_imports = {
         'flask': 'flask',
         'flask-cors': 'flask_cors',
-        'requests': 'requests',
-        'PyQt6': 'PyQt6'
     }
 
     missing_packages = []
@@ -95,10 +94,10 @@ def main():
         
         # Wait for backend to start
         print("⏳ Waiting for backend to initialize...")
-        time.sleep(3)
+        time.sleep(2)
         
-        # Start frontend
-        frontend_process = start_frontend()
+        # Start static web frontend
+        frontend_process = start_static_frontend(port=8000)
         if not frontend_process:
             print("❌ Cannot start frontend")
             if backend_process:
@@ -107,8 +106,8 @@ def main():
         
         print("\n🎉 TTPXHunter System Started Successfully!")
         print("📊 Backend API: http://localhost:5000")
-        print("🖥️  Frontend GUI: PyQt6 Dashboard")
-        print("🔗 Integration: Frontend ↔ Backend API")
+        print("🖥️  Frontend UI: http://localhost:8000/index.html")
+        print("🔗 Integration: Frontend (static) ↔ Backend API")
         print("\n💡 Features Available:")
         print("   • Real-time threat scanning via backend API")
         print("   • Threat mitigation through backend services")
@@ -124,7 +123,7 @@ def main():
                 print("❌ Backend process stopped unexpectedly")
                 break
             if frontend_process.poll() is not None:
-                print("ℹ️  Frontend closed by user")
+                print("ℹ️  Frontend server stopped")
                 break
             
             time.sleep(1)

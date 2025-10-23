@@ -45,6 +45,9 @@
                 <button id="scanBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold transition-colors">
                     Start Scan
                 </button>
+                <button id="streamBtn" class="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-semibold transition-colors">
+                    Start Live Monitor
+                </button>
                 <button id="mitigateBtn" class="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-semibold transition-colors" disabled>
                     Mitigate Threats
                 </button>
@@ -160,13 +163,17 @@
             constructor() {
                 this.threats = [];
                 this.isScanning = false;
+                this.isStreaming = false;
+                this.eventSource = null;
                 this.scanBtn = document.getElementById('scanBtn');
+                this.streamBtn = document.getElementById('streamBtn');
                 this.mitigateBtn = document.getElementById('mitigateBtn');
                 this.init();
             }
 
             init() {
                 this.scanBtn.addEventListener('click', () => this.startScan());
+                this.streamBtn.addEventListener('click', () => this.toggleStream());
                 this.mitigateBtn.addEventListener('click', () => this.mitigateThreats());
             }
 
@@ -208,6 +215,74 @@
                 }
             }
 
+            toggleStream() {
+                if (this.isStreaming) {
+                    this.stopStream();
+                } else {
+                    this.startStream();
+                }
+            }
+
+            startStream() {
+                if (this.isStreaming) return;
+                try {
+                    // Ensure backend is reachable first (optional)
+                    this.streamBtn.disabled = true;
+                    this.streamBtn.textContent = 'Connecting...';
+
+                    const es = new EventSource('http://127.0.0.1:5000/api/stream');
+                    this.eventSource = es;
+
+                    es.addEventListener('open', () => {
+                        this.isStreaming = true;
+                        this.streamBtn.disabled = false;
+                        this.streamBtn.textContent = 'Stop Live Monitor';
+                        this.streamBtn.className = 'bg-purple-800 hover:bg-purple-900 px-6 py-2 rounded-lg font-semibold transition-colors';
+                    });
+
+                    es.addEventListener('threat', (evt) => {
+                        try {
+                            const threat = JSON.parse(evt.data);
+                            this.threats = [threat, ...this.threats].slice(0, 100);
+                            this.updateUI();
+                            document.getElementById('lastScan').textContent = new Date().toLocaleTimeString();
+                        } catch (e) {
+                            console.error('Failed to parse threat event', e);
+                        }
+                    });
+
+                    es.addEventListener('ping', () => {
+                        // keepalive - no UI change
+                    });
+
+                    es.addEventListener('error', (evt) => {
+                        console.error('Stream error', evt);
+                        // Browser auto-reconnects; indicate transient issue
+                        document.getElementById('scanStatus').textContent = 'Live stream: reconnecting...';
+                    });
+
+                    es.onerror = () => {
+                        // Some browsers only fire generic onerror
+                        document.getElementById('scanStatus').textContent = 'Live stream: reconnecting...';
+                    };
+
+                } catch (err) {
+                    console.error('Failed to start live stream', err);
+                    this.streamBtn.disabled = false;
+                    this.streamBtn.textContent = 'Start Live Monitor';
+                }
+            }
+
+            stopStream() {
+                if (this.eventSource) {
+                    try { this.eventSource.close(); } catch (_) {}
+                }
+                this.eventSource = null;
+                this.isStreaming = false;
+                this.streamBtn.textContent = 'Start Live Monitor';
+                this.streamBtn.className = 'bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded-lg font-semibold transition-colors';
+            }
+
             async mitigateThreats() {
                 if (this.threats.length === 0) return;
 
@@ -238,6 +313,7 @@
                     console.error('Failed to mitigate threats:', error);
                 } finally {
                     this.mitigateBtn.textContent = 'Mitigate Threats';
+                    this.mitigateBtn.disabled = (this.threats.length === 0);
                 }
             }
             
@@ -251,7 +327,7 @@
                     document.getElementById('statusIcon').className = 'w-12 h-12 bg-red-500 rounded-full flex items-center justify-center threat-high';
                     document.getElementById('statusIcon').textContent = '⚠';
                     
-                    const highSeverity = this.threats.some(t => t.severity === 'High');
+                    const highSeverity = this.threats.some(t => t.severity === 'High' || t.severity === 'Critical');
                     document.getElementById('riskLevel').textContent = highSeverity ? 'High' : 'Medium';
                     document.getElementById('riskLevel').className = `text-2xl font-bold ${highSeverity ? 'text-red-400' : 'text-yellow-400'}`;
                     document.getElementById('riskIcon').className = `w-12 h-12 ${highSeverity ? 'bg-red-500 threat-high' : 'bg-yellow-500 threat-medium'} rounded-full flex items-center justify-center`;
@@ -278,10 +354,10 @@
                 }
 
                 threatsList.innerHTML = this.threats.map(threat => `
-                    <div class="border-l-4 ${threat.severity === 'High' ? 'border-red-500 bg-red-900/20' : 'border-yellow-500 bg-yellow-900/20'} p-4 rounded">
+                    <div class="border-l-4 ${(threat.severity === 'High' || threat.severity === 'Critical') ? 'border-red-500 bg-red-900/20' : 'border-yellow-500 bg-yellow-900/20'} p-4 rounded">
                         <div class="flex justify-between items-start mb-2">
                             <h4 class="font-semibold">${threat.name}</h4>
-                            <span class="px-2 py-1 text-xs rounded ${threat.severity === 'High' ? 'bg-red-600' : 'bg-yellow-600'}">${threat.severity}</span>
+                            <span class="px-2 py-1 text-xs rounded ${(threat.severity === 'High' || threat.severity === 'Critical') ? 'bg-red-600' : 'bg-yellow-600'}">${threat.severity}</span>
                         </div>
                         <p class="text-sm text-gray-300 mb-2">${threat.description}</p>
                         <div class="text-xs text-gray-400">

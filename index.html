@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Persistence Checker - Security Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes pulse-red {
+            0%, 100% { background-color: rgb(239, 68, 68); }
+            50% { background-color: rgb(220, 38, 38); }
+        }
+        @keyframes pulse-yellow {
+            0%, 100% { background-color: rgb(245, 158, 11); }
+            50% { background-color: rgb(217, 119, 6); }
+        }
+        .threat-high { animation: pulse-red 2s infinite; }
+        .threat-medium { animation: pulse-yellow 2s infinite; }
+        .scan-progress {
+            background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 100%);
+            animation: scan-sweep 3s ease-in-out infinite;
+        }
+        @keyframes scan-sweep {
+            0% { width: 0%; }
+            50% { width: 100%; }
+            100% { width: 0%; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-6 py-8">
+        <div class="flex items-center justify-between mb-8">
+            <div class="flex items-center space-x-4">
+                <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold">Persistence Checker</h1>
+                    <p class="text-gray-400">Device Agent Security Monitor</p>
+                </div>
+            </div>
+            <div class="flex space-x-4">
+                <button id="scanBtn" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg font-semibold transition-colors">
+                    Start Scan
+                </button>
+                <button id="mitigateBtn" class="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-semibold transition-colors" disabled>
+                    Mitigate Threats
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">System Status</p>
+                        <p id="systemStatus" class="text-2xl font-bold text-green-400">Secure</p>
+                    </div>
+                    <div id="statusIcon" class="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+                        ✓
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Threats Detected</p>
+                        <p id="threatCount" class="text-2xl font-bold">0</p>
+                    </div>
+                    <div class="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                        ⚠
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Last Scan</p>
+                        <p id="lastScan" class="text-2xl font-bold">Never</p>
+                    </div>
+                    <div class="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                        🔍
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-800 rounded-lg p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-400 text-sm">Risk Level</p>
+                        <p id="riskLevel" class="text-2xl font-bold text-green-400">Low</p>
+                    </div>
+                    <div id="riskIcon" class="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center">
+                        📊
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="scanProgress" class="bg-gray-800 rounded-lg p-6 mb-8 hidden">
+            <h3 class="text-xl font-semibold mb-4">Scanning for Persistence Threats...</h3>
+            <div class="bg-gray-700 rounded-full h-4 mb-4">
+                <div class="scan-progress h-4 rounded-full"></div>
+            </div>
+            <p id="scanStatus" class="text-gray-400">Initializing scan...</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h3 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center mr-3 text-sm">!</span>
+                    Detected Threats
+                </h3>
+                <div id="threatsList" class="space-y-4">
+                    <div class="text-gray-400 text-center py-8">
+                        No threats detected. Click "Start Scan" to begin monitoring.
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-6">
+                <h3 class="text-xl font-semibold mb-4 flex items-center">
+                    <span class="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center mr-3 text-sm">📊</span>
+                    System Monitoring
+                </h3>
+                <div class="space-y-4">
+                    <div class="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span>Registry Monitoring</span>
+                        <span id="registryStatus" class="text-green-400">✓ Active</span>
+                    </div>
+                    <div class="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span>Startup Programs</span>
+                        <span id="startupStatus" class="text-green-400">✓ Monitored</span>
+                    </div>
+                    <div class="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span>Service Changes</span>
+                        <span id="serviceStatus" class="text-green-400">✓ Tracked</span>
+                    </div>
+                    <div class="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span>File System</span>
+                        <span id="filesystemStatus" class="text-green-400">✓ Protected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="mitigationPanel" class="bg-gray-800 rounded-lg p-6 mt-8 hidden">
+            <h3 class="text-xl font-semibold mb-4 flex items-center">
+                <span class="w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center mr-3 text-sm">🛡</span>
+                Mitigation Actions
+            </h3>
+            <div id="mitigationActions" class="space-y-3">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        class PersistenceChecker {
+            constructor() {
+                this.threats = [];
+                this.isScanning = false;
+                this.scanBtn = document.getElementById('scanBtn');
+                this.mitigateBtn = document.getElementById('mitigateBtn');
+                this.init();
+            }
+
+            init() {
+                this.scanBtn.addEventListener('click', () => this.startScan());
+                this.mitigateBtn.addEventListener('click', () => this.mitigateThreats());
+            }
+
+            async startScan() {
+                if (this.isScanning) return;
+                
+                this.isScanning = true;
+                this.scanBtn.disabled = true;
+                this.scanBtn.textContent = 'Scanning...';
+                
+                const progressDiv = document.getElementById('scanProgress');
+                progressDiv.classList.remove('hidden');
+
+                try {
+                    // **Updated URL for backend API call**
+                    const response = await fetch('http://127.0.0.1:5000/api/scan', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    this.threats = await response.json(); 
+                    this.updateUI();
+                    
+                } catch (error) {
+                    console.error('Failed to start scan:', error);
+                    document.getElementById('scanStatus').textContent = 'Scan failed. Check console for details.';
+                    this.threats = [];
+                    this.updateUI();
+                } finally {
+                    progressDiv.classList.add('hidden');
+                    this.scanBtn.disabled = false;
+                    this.scanBtn.textContent = 'Start Scan';
+                    this.isScanning = false;
+                    document.getElementById('lastScan').textContent = new Date().toLocaleTimeString();
+                }
+            }
+
+            async mitigateThreats() {
+                if (this.threats.length === 0) return;
+
+                this.mitigateBtn.disabled = true;
+                this.mitigateBtn.textContent = 'Mitigating...';
+
+                const threatIds = this.threats.map(threat => threat.id);
+
+                try {
+                    // **Updated URL for backend API call**
+                    const response = await fetch('http://127.0.0.1:5000/api/mitigate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ threat_ids: threatIds })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Mitigation result:', result);
+
+                    this.threats = [];
+                    this.updateUI();
+                    document.getElementById('mitigationPanel').classList.add('hidden');
+                } catch (error) {
+                    console.error('Failed to mitigate threats:', error);
+                } finally {
+                    this.mitigateBtn.textContent = 'Mitigate Threats';
+                }
+            }
+            
+            updateUI() {
+                const threatCount = this.threats.length;
+                document.getElementById('threatCount').textContent = threatCount;
+                
+                if (threatCount > 0) {
+                    document.getElementById('systemStatus').textContent = 'At Risk';
+                    document.getElementById('systemStatus').className = 'text-2xl font-bold text-red-400';
+                    document.getElementById('statusIcon').className = 'w-12 h-12 bg-red-500 rounded-full flex items-center justify-center threat-high';
+                    document.getElementById('statusIcon').textContent = '⚠';
+                    
+                    const highSeverity = this.threats.some(t => t.severity === 'High');
+                    document.getElementById('riskLevel').textContent = highSeverity ? 'High' : 'Medium';
+                    document.getElementById('riskLevel').className = `text-2xl font-bold ${highSeverity ? 'text-red-400' : 'text-yellow-400'}`;
+                    document.getElementById('riskIcon').className = `w-12 h-12 ${highSeverity ? 'bg-red-500 threat-high' : 'bg-yellow-500 threat-medium'} rounded-full flex items-center justify-center`;
+                    
+                    this.mitigateBtn.disabled = false;
+                } else {
+                    document.getElementById('systemStatus').textContent = 'Secure';
+                    document.getElementById('systemStatus').className = 'text-2xl font-bold text-green-400';
+                    document.getElementById('riskLevel').textContent = 'Low';
+                    document.getElementById('riskLevel').className = 'text-2xl font-bold text-green-400';
+                    this.mitigateBtn.disabled = true;
+                }
+
+                this.renderThreats();
+            }
+
+            renderThreats() {
+                const threatsList = document.getElementById('threatsList');
+                
+                if (this.threats.length === 0) {
+                    threatsList.innerHTML = '<div class="text-gray-400 text-center py-8">No threats detected. System is secure.</div>';
+                    document.getElementById('mitigationPanel').classList.add('hidden');
+                    return;
+                }
+
+                threatsList.innerHTML = this.threats.map(threat => `
+                    <div class="border-l-4 ${threat.severity === 'High' ? 'border-red-500 bg-red-900/20' : 'border-yellow-500 bg-yellow-900/20'} p-4 rounded">
+                        <div class="flex justify-between items-start mb-2">
+                            <h4 class="font-semibold">${threat.name}</h4>
+                            <span class="px-2 py-1 text-xs rounded ${threat.severity === 'High' ? 'bg-red-600' : 'bg-yellow-600'}">${threat.severity}</span>
+                        </div>
+                        <p class="text-sm text-gray-300 mb-2">${threat.description}</p>
+                        <div class="text-xs text-gray-400">
+                            <p><strong>Type:</strong> ${threat.type}</p>
+                            <p><strong>Location:</strong> ${threat.location}</p>
+                            <p><strong>Detected:</strong> ${threat.timestamp}</p>
+                        </div>
+                    </div>
+                `).join('');
+
+                document.getElementById('mitigationPanel').classList.remove('hidden');
+                this.renderMitigationActions();
+            }
+
+            renderMitigationActions() {
+                const actions = document.getElementById('mitigationActions');
+                actions.innerHTML = this.threats.map(threat => `
+                    <div class="flex justify-between items-center p-3 bg-gray-700 rounded">
+                        <span>Remove ${threat.name}</span>
+                        <button onclick="persistenceChecker.removeThreat(${threat.id})" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm transition-colors">
+                            Remove
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            removeThreat(threatId) {
+                // This function is for local UI changes, the real mitigation happens via the API.
+                this.threats = this.threats.filter(t => t.id !== threatId);
+                this.updateUI();
+                
+                if (this.threats.length === 0) {
+                    document.getElementById('mitigationPanel').classList.add('hidden');
+                }
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // Initialize the persistence checker
+        const persistenceChecker = new PersistenceChecker();
+    </script>
+</body>
+</html>

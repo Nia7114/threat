@@ -1,0 +1,14 @@
+pandas
+numpy
+scikit-learn
+PyQt6
+psutil
+flask
+flask-cors
+requests
+watchdog
+yara-python
+transformers
+torch
+reportlab
+

@@ -1,0 +1,162 @@
+import sys, threading, queue, ast
+from PyQt6 import QtWidgets
+from PyQt6.QtWidgets import QMainWindow, QTableWidgetItem, QMessageBox, QAbstractItemView
+from PyQt6.QtCore import QTimer
+from monitor.process_monitor import ProcessMonitor
+from monitor.network_monitor import NetworkMonitor
+from monitor.startup_monitor import StartupMonitor
+from detection.anomaly_model import SimpleAnomalyModel
+from detection.classifier import rule_based_severity
+from mitigation.actions import kill_process, block_ip
+from database.logger import log_incident, recent_incidents
+from utils.helpers import now_ts
+
+SEV_ORDER = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+
+
+class ThreatApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AI Threat Prediction & Mitigation")
+        self.resize(1100, 640)
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+        layout = QtWidgets.QVBoxLayout(central)
+
+        # Controls
+        top = QtWidgets.QHBoxLayout()
+        self.start_btn = QtWidgets.QPushButton("Start Monitoring")
+        self.stop_btn = QtWidgets.QPushButton("Stop")
+        self.sim_btn = QtWidgets.QPushButton("Simulate Threat")
+        self.stop_btn.setEnabled(False)
+        top.addWidget(self.start_btn)
+        top.addWidget(self.stop_btn)
+        top.addWidget(self.sim_btn)
+        layout.addLayout(top)
+
+        # Table
+        self.table = QtWidgets.QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(["Time", "Source", "Severity", "Details", "Action", "Controls"])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setStretchLastSection        layout.addWidget(self.table)
+
+        self.queue = queue.Queue()
+        self.running_flag = threading.Event()
+        self.model = SimpleAnomalyModel()
+
+        # Signals
+        self.start_btn.clicked.connect(self.start)
+        self.stop_btn.clicked.connect(self.stop)
+        self.sim_btn.clicked.connect(self.simulate)
+
+        # Timer to refresh table
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.refresh)
+        self.timer.start(1500)
+
+    def start(self):
+        self.running_flag.set()
+        self.proc = ProcessMonitor(self.queue, self.running_flag)
+        self.proc.start()
+        self.net = NetworkMonitor(self.queue, self.running_flag)
+        self.net.start()
+        self.stu = StartupMonitor(self.queue, self.running_flag)
+        self.stu.start()
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        threading.Thread(target=self.consume, daemon=True).start()
+
+    def stop(self):
+        self.running_flag.clear()
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+    def simulate(self):
+        # Lightweight local simulation: push a crafted event into the queue
+        self.queue.put({
+            "source": "network",
+            "pid": 12345,
+            "name": "dummy",
+            "exe": "",
+            "cpu": 10,
+            "mem": 1,
+            "num_conns": 100,
+            "flags": {"suspicious_port": True, "to_blacklist_ip": True},
+            "bad_ip": "198.51.100.42",
+            "bad_port": 4444
+        })
+
+    def consume(self):
+        while self.running_flag.is_set():
+            try:
+                ev = self.queue.get(timeout=1)
+            except:
+                continue
+            # Feature vector for ML model
+            port_score = 1 if ev.get("flags", {}).get("suspicious_port") else 0
+            features = [ev.get("cpu", 0), ev.get("mem", 0), ev.get("num_conns", 0), port_score]
+            # Train baseline until ready
+            self.model.add_baseline(features)
+            sev_ml, score = self.model.predict_severity(features)
+            sev_rule = rule_based_severity(ev.get("flags", {}), ev.get("cpu", 0), ev.get("mem", 0), ev.get("num_conns", 0))
+            sev = sev_rule if SEV_ORDER[sev_rule] >= SEV_ORDER[sev_ml] else sev_ml
+
+            # Auto-mitigate: block IP on HIGH
+            action = ""
+            if sev == "HIGH" and ev.get("source") == "network" and ev.get("flags", {}).get("to_blacklist_ip"):
+                action = block_ip(ev.get("bad_ip"))
+
+            details = str(ev)
+            log_incident(now_ts(), ev.get("source", ""), "detect", sev, details, action)
+
+    def refresh(self):
+        rows = recent_incidents(200)
+        self.table.setRowCount(0)
+        for r in rows:
+            _id, ts, src, etype, sev, det, act = r
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(ts))
+            self.table.setItem(row, 1, QTableWidgetItem(src))
+            self.table.setItem(row, 2, QTableWidgetItem(sev))
+            self.table.setItem(row, 3, QTableWidgetItem(det))
+            self.table.setItem(row, 4, QTableWidgetItem(act))
+            # Kill button if PID present in details
+            btn = QtWidgets.QPushButton("Kill PID")
+            pid = self._extract_pid(det)
+            btn.setEnabled(pid is not None)
+            btn.clicked.connect(lambda _, p=pid: self._confirm_kill(p))
+            self.table.setCellWidget(row, 5, btn)
+
+    def _extract_pid(self, det):
+        try:
+            d = ast.literal_eval(det)
+            pid = d.get("pid", None)
+            return int(pid) if pid else None
+        except Exception:
+            return None
+
+    def _confirm_kill(self, pid):
+        if pid is None:
+            return
+        res = QMessageBox.question(
+            self,
+            "Confirm",
+            f"Kill PID {pid}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if res == QMessageBox.StandardButton.Yes:
+            msg = kill_process(pid)
+            log_incident(now_ts(), "mitigation", "kill", "INFO", f"user kill {pid}", msg)
+            QMessageBox.information(self, "Kill", msg)
+
+
+def main():
+    app = QtWidgets.QApplication(sys.argv)
+    w = ThreatApp()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":

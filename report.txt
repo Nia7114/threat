@@ -1,0 +1,2 @@
+APT29 used PowerShell for persistence and exfiltration of data.
+The attackers leveraged scheduled tasks to maintain access.
